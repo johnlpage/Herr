@@ -43,15 +43,17 @@
         const ctx = canvas.getContext('2d');  
           
         let particles = [];  
-        let dragRadius = 30;  
+        let dragRadius = 40;  
         let lastTouch = null;  
         let draggingSet = new Set();  
         let occupied = new Set();  
-        let spacingMultiplier = 1.3;  
+        let spacingMultiplier = 1;  
         let maxDragging = 2000;  
+        let attractionStrength = 1.5;  
           
-        // Define shape boundary points  
-        const shapePoints = [  
+        // Define shape boundary points at reference width of 785  
+        const referenceWidth = 785;  
+        const shapePointsBase = [  
             [230, 150],  
             [280, 130],  
             [340, 120],  
@@ -75,6 +77,15 @@
         };  
           
         function generateParticlesInShape() {  
+            // Calculate scale factor  
+            let scale = canvas.width / referenceWidth;  
+              
+            // Scale the shape points  
+            let shapePoints = shapePointsBase.map(point => [  
+                point[0] * scale,  
+                point[1] * scale  
+            ]);  
+              
             let minX = Math.min(...shapePoints.map(p => p[0]));  
             let maxX = Math.max(...shapePoints.map(p => p[0]));  
             let minY = Math.min(...shapePoints.map(p => p[1]));  
@@ -172,10 +183,45 @@
                 }  
             }  
               
-            // Move all particles in the dragging set  
+            // Clear occupied positions for dragging particles  
             for (let i of draggingSet) {  
-                particles[i][0] += deltaX;  
-                particles[i][1] += deltaY;  
+                let [x, y] = particles[i];  
+                occupied.delete(`${Math.round(x)},${Math.round(y)}`);  
+            }  
+              
+            // Move all particles in the dragging set with drag + attraction  
+            let tempOccupied = new Set();  
+            for (let i of draggingSet) {  
+                let [x, y, angle] = particles[i];  
+                let dx = touchX - x;  
+                let dy = touchY - y;  
+                let dist = Math.sqrt(dx * dx + dy * dy);  
+                  
+                // Calculate movement: drag delta + attraction toward cursor  
+                let attractX = dist > 0 ? (dx / dist) * attractionStrength : 0;  
+                let attractY = dist > 0 ? (dy / dist) * attractionStrength : 0;  
+                  
+                let totalX = deltaX + attractX;  
+                let totalY = deltaY + attractY;  
+                  
+                let newX = Math.round(x + totalX);  
+                let newY = Math.round(y + totalY);  
+                let key = `${newX},${newY}`;  
+                  
+                // Try to place particle  
+                if (!occupied.has(key) && !tempOccupied.has(key)) {  
+                    particles[i][0] = newX;  
+                    particles[i][1] = newY;  
+                    tempOccupied.add(key);  
+                } else {  
+                    // Keep old position if blocked  
+                    tempOccupied.add(`${Math.round(x)},${Math.round(y)}`);  
+                }  
+            }  
+              
+            // Add back to occupied  
+            for (let key of tempOccupied) {  
+                occupied.add(key);  
             }  
         }  
           
