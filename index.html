@@ -1,0 +1,345 @@
+<!DOCTYPE html>  
+<html lang="en">  
+<head>  
+    <meta charset="UTF-8">  
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">  
+    <title>Magnetic Face</title>  
+    <style>  
+        * {  
+            margin: 0;  
+            padding: 0;  
+            box-sizing: border-box;  
+        }  
+        body {  
+            overflow: hidden;  
+        }  
+        #container {  
+            position: relative;  
+            width: 100%;  
+        }  
+        img {  
+            width: 100%;  
+            height: auto;  
+            display: block;  
+        }  
+        canvas {  
+            position: absolute;  
+            top: 0;  
+            left: 0;  
+            width: 100%;  
+            height: 100%;  
+            touch-action: none;  
+        }  
+    </style>  
+</head>  
+<body>  
+    <div id="container">  
+        <img src="baldzak.jpg" alt="Face" id="face">  
+        <canvas id="particles"></canvas>  
+    </div>  
+    <script>  
+        const img = document.getElementById('face');  
+        const canvas = document.getElementById('particles');  
+        const ctx = canvas.getContext('2d');  
+          
+        let particles = [];  
+        let dragRadius = 30;  
+        let lastTouch = null;  
+        let draggingSet = new Set();  
+        let occupied = new Set();  
+        let spacingMultiplier = 1.3;  
+        let maxDragging = 2000;  
+          
+        // Define shape boundary points  
+        const shapePoints = [  
+            [230, 150],  
+            [280, 130],  
+            [340, 120],  
+            [400, 120],  
+            [500, 160],  
+            [520, 180],  
+            [560, 220],  
+            [570, 240],  
+            [400, 200],  
+            [360, 230],  
+            [220, 200],  
+            [180, 240]  
+        ];  
+          
+        img.onload = function() {  
+            canvas.width = img.width;  
+            canvas.height = img.height;  
+              
+            generateParticlesInShape();  
+            drawParticles();  
+        };  
+          
+        function generateParticlesInShape() {  
+            let minX = Math.min(...shapePoints.map(p => p[0]));  
+            let maxX = Math.max(...shapePoints.map(p => p[0]));  
+            let minY = Math.min(...shapePoints.map(p => p[1]));  
+            let maxY = Math.max(...shapePoints.map(p => p[1]));  
+              
+            let tempCanvas = document.createElement('canvas');  
+            tempCanvas.width = canvas.width;  
+            tempCanvas.height = canvas.height;  
+            let tempCtx = tempCanvas.getContext('2d');  
+              
+            tempCtx.beginPath();  
+            tempCtx.moveTo(shapePoints[0][0], shapePoints[0][1]);  
+              
+            for (let i = 1; i < shapePoints.length - 2; i++) {  
+                let xc = (shapePoints[i][0] + shapePoints[i + 1][0]) / 2;  
+                let yc = (shapePoints[i][1] + shapePoints[i + 1][1]) / 2;  
+                tempCtx.quadraticCurveTo(shapePoints[i][0], shapePoints[i][1], xc, yc);  
+            }  
+              
+            tempCtx.quadraticCurveTo(  
+                shapePoints[shapePoints.length - 2][0],  
+                shapePoints[shapePoints.length - 2][1],  
+                shapePoints[shapePoints.length - 1][0],  
+                shapePoints[shapePoints.length - 1][1]  
+            );  
+              
+            tempCtx.closePath();  
+            tempCtx.fill();  
+              
+            let imageData = tempCtx.getImageData(minX, minY, maxX - minX, maxY - minY);  
+              
+            for (let x = minX; x < maxX; x++) {  
+                for (let y = minY; y < maxY; y++) {  
+                    let index = ((y - minY) * (maxX - minX) + (x - minX)) * 4;  
+                    if (imageData.data[index + 3] > 0) {  
+                        particles.push([x, y, Math.random() * Math.PI * 2]);  
+                        occupied.add(`${Math.round(x)},${Math.round(y)}`);  
+                    }  
+                }  
+            }  
+        }  
+          
+        function drawParticles() {  
+            ctx.clearRect(0, 0, canvas.width, canvas.height);  
+            ctx.strokeStyle = 'black';  
+            ctx.lineWidth = 1;  
+              
+            for (let i = 0; i < particles.length; i++) {  
+                let [x, y, angle] = particles[i];  
+                let x2 = x + Math.cos(angle) * 4;  
+                let y2 = y + Math.sin(angle) * 4;  
+                  
+                ctx.beginPath();  
+                ctx.moveTo(x, y);  
+                ctx.lineTo(x2, y2);  
+                ctx.stroke();  
+            }  
+        }  
+          
+        function getCanvasCoords(e) {  
+            let rect = canvas.getBoundingClientRect();  
+            let touch = e.touches ? e.touches[0] : e;  
+            return {  
+                x: (touch.clientX - rect.left) * (canvas.width / rect.width),  
+                y: (touch.clientY - rect.top) * (canvas.height / rect.height)  
+            };  
+        }  
+          
+        function moveParticlesOneStep(touchX, touchY, deltaX, deltaY) {  
+            // Check for new particles within drag radius and add them to dragging set (up to max)  
+            if (draggingSet.size < maxDragging) {  
+                let candidates = [];  
+                  
+                for (let i = 0; i < particles.length; i++) {  
+                    if (!draggingSet.has(i)) {  
+                        let [x, y, angle] = particles[i];  
+                        let dx = touchX - x;  
+                        let dy = touchY - y;  
+                        let dist = Math.sqrt(dx * dx + dy * dy);  
+                          
+                        if (dist < dragRadius) {  
+                            candidates.push({index: i, dist: dist});  
+                        }  
+                    }  
+                }  
+                  
+                // Sort by distance (closest first) and add up to the limit  
+                candidates.sort((a, b) => a.dist - b.dist);  
+                for (let c of candidates) {  
+                    if (draggingSet.size < maxDragging) {  
+                        draggingSet.add(c.index);  
+                    } else {  
+                        break;  
+                    }  
+                }  
+            }  
+              
+            // Move all particles in the dragging set  
+            for (let i of draggingSet) {  
+                particles[i][0] += deltaX;  
+                particles[i][1] += deltaY;  
+            }  
+        }  
+          
+        function packParticlesAroundCursor(centerX, centerY) {  
+            let indices = Array.from(draggingSet);  
+            if (indices.length === 0) return;  
+              
+            // Clear occupied set and rebuild it  
+            occupied.clear();  
+              
+            // Add non-dragging particles to occupied  
+            for (let i = 0; i < particles.length; i++) {  
+                if (!draggingSet.has(i)) {  
+                    let [x, y] = particles[i];  
+                    occupied.add(`${Math.round(x)},${Math.round(y)}`);  
+                }  
+            }  
+              
+            // Pack particles in a spiral pattern around the cursor with spacing  
+            let placed = new Set();  
+            let positions = [];  
+              
+            // Generate spiral positions with increased spacing  
+            positions.push([Math.round(centerX), Math.round(centerY)]);  
+              
+            for (let radius = spacingMultiplier; radius < 300; radius += spacingMultiplier) {  
+                let circumference = 2 * Math.PI * radius;  
+                let numPoints = Math.max(8, Math.ceil(circumference / spacingMultiplier));  
+                  
+                for (let i = 0; i < numPoints; i++) {  
+                    let angle = (i / numPoints) * 2 * Math.PI;  
+                    let x = Math.round(centerX + Math.cos(angle) * radius);  
+                    let y = Math.round(centerY + Math.sin(angle) * radius);  
+                    positions.push([x, y]);  
+                }  
+                  
+                if (positions.length > indices.length * 3) break;  
+            }  
+              
+            // Place particles in the first available positions  
+            let posIndex = 0;  
+            for (let i of indices) {  
+                while (posIndex < positions.length) {  
+                    let [x, y] = positions[posIndex];  
+                    let key = `${x},${y}`;  
+                    posIndex++;  
+                      
+                    if (!occupied.has(key) && !placed.has(key)) {  
+                        particles[i][0] = x;  
+                        particles[i][1] = y;  
+                        occupied.add(key);  
+                        placed.add(key);  
+                        break;  
+                    }  
+                }  
+            }  
+        }  
+          
+        function moveParticles(touchX, touchY) {  
+            if (!lastTouch) {  
+                lastTouch = {x: touchX, y: touchY};  
+                // Initialize dragging set with particles near touch point (up to max)  
+                draggingSet.clear();  
+                let candidates = [];  
+                  
+                for (let i = 0; i < particles.length; i++) {  
+                    let [x, y, angle] = particles[i];  
+                    let dx = touchX - x;  
+                    let dy = touchY - y;  
+                    let dist = Math.sqrt(dx * dx + dy * dy);  
+                      
+                    if (dist < dragRadius) {  
+                        candidates.push({index: i, dist: dist});  
+                    }  
+                }  
+                  
+                // Sort by distance and take the closest ones up to maxDragging  
+                candidates.sort((a, b) => a.dist - b.dist);  
+                for (let i = 0; i < Math.min(candidates.length, maxDragging); i++) {  
+                    draggingSet.add(candidates[i].index);  
+                }  
+                return;  
+            }  
+              
+            let totalDeltaX = touchX - lastTouch.x;  
+            let totalDeltaY = touchY - lastTouch.y;  
+            let totalDistance = Math.sqrt(totalDeltaX * totalDeltaX + totalDeltaY * totalDeltaY);  
+              
+            // Break into steps of 1 pixel each  
+            let steps = Math.ceil(totalDistance);  
+              
+            if (steps > 0) {  
+                let stepX = totalDeltaX / steps;  
+                let stepY = totalDeltaY / steps;  
+                  
+                let currentX = lastTouch.x;  
+                let currentY = lastTouch.y;  
+                  
+                for (let step = 0; step < steps; step++) {  
+                    currentX += stepX;  
+                    currentY += stepY;  
+                    moveParticlesOneStep(currentX, currentY, stepX, stepY);  
+                }  
+            }  
+              
+            lastTouch = {x: touchX, y: touchY};  
+            drawParticles();  
+        }  
+          
+        canvas.addEventListener('touchstart', (e) => {  
+            e.preventDefault();  
+            lastTouch = null;  
+            draggingSet.clear();  
+            let coords = getCanvasCoords(e);  
+            moveParticles(coords.x, coords.y);  
+        });  
+          
+        canvas.addEventListener('touchmove', (e) => {  
+            e.preventDefault();  
+            let coords = getCanvasCoords(e);  
+            moveParticles(coords.x, coords.y);  
+        });  
+          
+        canvas.addEventListener('touchend', (e) => {  
+            e.preventDefault();  
+            if (lastTouch) {  
+                packParticlesAroundCursor(lastTouch.x, lastTouch.y);  
+                drawParticles();  
+            }  
+            lastTouch = null;  
+            draggingSet.clear();  
+        });  
+          
+        canvas.addEventListener('mousedown', (e) => {  
+            lastTouch = null;  
+            draggingSet.clear();  
+            let coords = getCanvasCoords(e);  
+            moveParticles(coords.x, coords.y);  
+        });  
+          
+        canvas.addEventListener('mousemove', (e) => {  
+            if (e.buttons === 1) {  
+                let coords = getCanvasCoords(e);  
+                moveParticles(coords.x, coords.y);  
+            }  
+        });  
+          
+        canvas.addEventListener('mouseup', (e) => {  
+            if (lastTouch) {  
+                packParticlesAroundCursor(lastTouch.x, lastTouch.y);  
+                drawParticles();  
+            }  
+            lastTouch = null;  
+            draggingSet.clear();  
+        });  
+          
+        canvas.addEventListener('mouseleave', (e) => {  
+            if (lastTouch) {  
+                packParticlesAroundCursor(lastTouch.x, lastTouch.y);  
+                drawParticles();  
+            }  
+            lastTouch = null;  
+            draggingSet.clear();  
+        });  
+    </script>  
+</body>  
+</html>  
